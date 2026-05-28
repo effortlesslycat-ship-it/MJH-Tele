@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teleprompter</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    function Teleprompter() {
+      // --- UI State ---
+      const [isEditing, setIsEditing] = useState(true);
+      const [scriptText, setScriptText] = useState("Paste your script here...\n\nHit Enter twice to create a new segment.");
+      const [fontSize, setFontSize] = useState(64);
+      const [speed, setSpeed] = useState(2);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [isMirrored, setIsMirrored] = useState(false);
+
+      // --- Mutable references for the animation loop ---
+      const speedRef = useRef(speed);
+      const isPlayingRef = useRef(isPlaying);
+      const positionYRef = useRef(0);
+      
+      // --- DOM references ---
+      const textContainerRef = useRef(null);
+      const animationRef = useRef(null);
+
+      // Keep refs synced with React state
+      useEffect(() => { speedRef.current = speed; }, [speed]);
+      useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+      // --- Segment Jumping Logic ---
+      const jumpSegment = (direction) => {
+        if (!textContainerRef.current) return;
+        const segments = Array.from(textContainerRef.current.children);
+        if (segments.length === 0) return;
+        const currentY = positionYRef.current;
+        let currentIndex = segments.findIndex(seg => seg.offsetTop >= currentY - 50);
+        if (currentIndex === -1) currentIndex = segments.length - 1;
+        let targetIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+        if (targetIndex < 0) targetIndex = 0;
+        if (targetIndex >= segments.length) targetIndex = segments.length - 1;
+        positionYRef.current = segments[targetIndex].offsetTop;
+      };
+
+      // --- Keyboard & Remote Listener ---
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (isEditing) return;
+          if (e.code === 'Space') { e.preventDefault(); setIsPlaying((prev) => !prev); }
+          if (e.code === 'ArrowUp') { e.preventDefault(); setSpeed((prev) => Math.min(prev + 0.5, 10)); }
+          if (e.code === 'ArrowDown') { e.preventDefault(); setSpeed((prev) => Math.max(prev - 0.5, 0.5)); }
+          if (e.code === 'ArrowLeft') { e.preventDefault(); jumpSegment('prev'); }
+          if (e.code === 'ArrowRight') { e.preventDefault(); jumpSegment('next'); }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [isEditing]);
+
+      // --- The 60fps render loop ---
+      const animate = () => {
+        if (isPlayingRef.current && textContainerRef.current) {
+          positionYRef.current += speedRef.current;
+          textContainerRef.current.style.transform = `translateY(-${positionYRef.current}px)`;
+        }
+        animationRef.current = requestAnimationFrame(animate);
+      };
+
+      useEffect(() => {
+        if (!isEditing) {
+          animationRef.current = requestAnimationFrame(animate);
+        }
+        return () => cancelAnimationFrame(animationRef.current);
+      }, [isEditing]);
+
+      // --- Render Edit Mode ---
+      if (isEditing) {
+        return (
+          <div className="flex flex-col h-screen bg-gray-100 p-8">
+            <h1 className="text-2xl font-bold mb-4 text-black">Script Editor</h1>
+            <textarea
+              className="flex-1 p-4 text-lg border-2 border-gray-300 rounded text-black font-sans"
+              value={scriptText}
+              onChange={(e) => setScriptText(e.target.value)}
+            />
+            <button 
+              onClick={() => { positionYRef.current = 0; setIsEditing(false); }}
+              className="mt-4 p-4 bg-blue-600 text-white font-bold rounded text-xl"
+            >
+              Start Prompter
+            </button>
+          </div>
+        );
+      }
+
+      // --- Render Prompter Mode ---
+      return (
+        <div className="flex flex-col h-screen bg-black text-white relative">
+          
+          <div className="flex-1 overflow-hidden relative pt-[33vh]" style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}>
+            <div className="absolute top-[33vh] left-0 w-full h-20 border-y-4 border-red-600/60 bg-red-600/10 pointer-events-none z-20"></div>
+            <div ref={textContainerRef} className="absolute w-full px-12 text-center">
+              {scriptText.split('\n\n').map((segment, index) => (
+                <p key={index} className="mb-24 font-sans" style={{ fontSize: `${fontSize}px`, lineHeight: '1.4' }}>
+                  {segment}
+                </p>
+              ))}
+              <div className="h-[60vh]"></div>
+            </div>
+          </div>
+
+          <div className="h-32 bg-gray-900 p-4 flex items-center justify-between z-30 relative overflow-x-auto">
+            <div className="flex gap-2 shrink-0">
+              <button onClick={() => setIsEditing(true)} className="p-4 bg-red-600 font-bold rounded text-white">Edit Script</button>
+              <button onClick={() => setIsMirrored(!isMirrored)} className={`p-4 font-bold rounded text-white ${isMirrored ? 'bg-green-600' : 'bg-gray-600'}`}>Mirror</button>
+            </div>
+
+            <div className="flex gap-4 shrink-0 mx-4">
+              <button onClick={() => jumpSegment('prev')} className="p-4 bg-gray-700 font-bold rounded text-white">⏪ Prev</button>
+              <button onClick={() => setIsPlaying(!isPlaying)} className={`p-4 font-bold rounded w-28 text-white ${isPlaying ? 'bg-yellow-600' : 'bg-blue-600'}`}>
+                {isPlaying ? 'Pause' : 'Play'}
+              </button>
+              <button onClick={() => jumpSegment('next')} className="p-4 bg-gray-700 font-bold rounded text-white">Next ⏩</button>
+            </div>
+
+            <div className="flex gap-4 w-64 shrink-0 text-white">
+              <div className="flex flex-col w-1/2">
+                <label>Speed: {speed}</label>
+                <input type="range" min="0.5" max="10" step="0.5" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} />
+              </div>
+              <div className="flex flex-col w-1/2">
+                <label>Size: {fontSize}px</label>
+                <input type="range" min="24" max="120" step="4" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} />
+              </div>
+            </div>
+          </div>
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<Teleprompter />);
+  </script>
+</body>
+</html>
